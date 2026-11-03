@@ -1,0 +1,16 @@
+{
+  "name": "personal-knowledge-atlas",
+  "author": "370958248",
+  "url": "https://github.com/370958248/personal-knowledge-atlas",
+  "version": "0.7.0",
+  "minAppVersion": "3.8.9",
+  "backends": ["windows", "linux", "darwin"],
+  "frontends": ["desktop", "browser-desktop"],
+  "disabledInPublish": true,
+  "displayName": {"default": "个人知识图谱", "zh-CN": "个人知识图谱"},
+  "description": {"default": "将选定笔记本展示为放射图、分组图和旭日图，叠加原生引用，支持隐藏内容、保存视角和设置备份。", "zh-CN": "将选定笔记本展示为放射图、分组图和旭日图，叠加原生引用，支持隐藏内容、保存视角和设置备份。"},
+  "readme": {"default": "README.md", "zh-CN": "README.md"},
+  "icon": "icon.png",
+  "preview": "preview.png",
+  "keywords": ["知识图谱", "笔记地图", "旭日图", "放射图", "双链", "笔记导航", "graph", "atlas"]
+}

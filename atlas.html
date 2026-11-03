@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>个人知识图谱</title><link rel="stylesheet" href="atlas.css?v=0.7.0"></head>
+<body>
+<main class="atlas-app">
+  <header class="app-header">
+    <div class="brand"><span class="brand-icon">✣</span><div><h1>个人知识图谱</h1><p><span id="scope-subtitle">未选择笔记本</span> ／ 文档层级视图</p></div></div>
+    <div class="header-actions"><button id="choose-notebooks-header" class="header-notebooks" aria-haspopup="dialog">笔记本</button><button id="manage-hidden-header" class="header-notebooks" aria-haspopup="dialog" disabled>隐藏</button><button id="workspace-open" class="settings-button" aria-haspopup="dialog">视角与备份</button><span class="connection" id="connection">正在连接思源</span><button id="theme" class="icon-button" aria-label="切换明暗主题" title="切换明暗主题">◐</button><button id="refresh" class="refresh-button">↻ <span>刷新</span></button></div>
+  </header>
+  <section class="workspace">
+    <aside class="left-panel panel">
+      <button id="choose-notebooks" class="notebook-picker" aria-haspopup="dialog"><span><small>展示范围</small><strong id="scope-label">选择笔记本</strong></span><span aria-hidden="true">⌄</span></button>
+      <div class="search-wrap"><span aria-hidden="true">⌕</span><input id="search" type="search" maxlength="200" placeholder="搜索笔记标题…" aria-label="搜索笔记标题"></div>
+      <div id="search-info" class="search-info" hidden></div>
+      <div class="panel-title"><h2>知识目录</h2><button id="home" class="text-button">全部</button></div>
+      <div id="tree" class="tree" role="tree" aria-label="所选笔记本文档目录"></div>
+      <div class="display-settings"><div class="setting-row"><label for="depth">展开层级</label><select id="depth"><option value="1">1 层</option><option value="2" selected>2 层</option><option value="3">3 层</option><option value="4">4 层</option><option value="12">全部层级</option></select></div><div class="setting-row"><label for="limit">节点上限</label><select id="limit"><option value="80">80</option><option value="180" selected>180</option><option value="360">360</option><option value="800">800</option></select></div><label class="check-row"><input id="show-references" type="checkbox" checked> 显示双链关系</label><label class="check-row reference-scope"><input id="selected-references" type="checkbox"> 仅看当前笔记的双链</label><label class="check-row"><input id="auto" type="checkbox" checked> 自动更新</label></div>
+      <button id="manage-hidden" class="manage-hidden" aria-haspopup="dialog" disabled>隐藏内容</button>
+      <div class="scope-note"><span class="scope-dot"></span><span id="scope-note-text">仅展示已选笔记本</span></div>
+    </aside>
+    <section class="map-panel" aria-label="知识图谱">
+      <div class="map-top"><div class="map-location"><div class="navigation-buttons"><button id="nav-back" aria-label="返回上一步" title="返回上一步" disabled>←</button><button id="nav-forward" aria-label="前进一步" title="前进一步" disabled>→</button></div><nav id="breadcrumbs" class="breadcrumbs" aria-label="当前位置"></nav></div><div class="map-tools"><div class="view-switch" role="group" aria-label="图谱布局"><button data-view="radial" class="active">放射</button><button data-view="grouped">分组</button><button data-view="sunburst">旭日</button></div><label id="label-control" class="label-control">文字<select id="label-mode" aria-label="图谱文字显示" title="三种布局共用：全部显示每个已展示节点的文字；密集时可放大查看。自动模式随缩放调整文字数量。"><option value="all">全部显示</option><option value="auto">自动显示</option></select></label></div></div>
+      <div id="canvas-wrap" class="canvas-wrap"><svg id="graph" xmlns="http://www.w3.org/2000/svg" aria-label="可交互知识图谱" role="group"><g id="viewport"></g></svg><div id="empty" class="empty" hidden></div><div id="tooltip" class="tooltip" hidden></div></div>
+      <div class="map-bottom"><span id="graph-count">正在读取文档层级…</span><div class="zoom-controls"><button id="zoom-out" aria-label="缩小">−</button><button id="fit" title="适应画面">适应</button><button id="zoom-in" aria-label="放大">＋</button></div></div>
+      <div class="reference-summary"><span class="reference-legend">实线：层级 <span>┄→</span> 虚线：引用</span><span id="reference-status" aria-live="polite"></span></div>
+      <p class="map-hint">滚轮缩放 · 拖动平移 · 单击查看 · 双击聚焦</p>
+    </section>
+    <aside class="right-panel panel" id="details" aria-label="笔记详情"></aside>
+  </section>
+  <footer class="app-footer"><span id="updated">本地笔记，自主整理</span><span>笔记层级与引用关系</span></footer>
+</main>
+<dialog id="notebook-dialog" class="notebook-dialog" aria-labelledby="notebook-dialog-title">
+  <div class="dialog-heading"><div><h2 id="notebook-dialog-title">选择展示的笔记本</h2><p>可同时选择多个，图谱仅读取勾选的内容。</p></div><button id="notebook-close" class="icon-button" aria-label="关闭笔记本选择">×</button></div>
+  <div id="notebook-list" class="notebook-list"></div>
+  <p id="notebook-selection-count" class="dialog-hint" aria-live="polite"></p>
+  <p id="notebook-selection-error" class="error-message" hidden></p>
+  <div class="dialog-actions"><button id="notebook-clear" class="text-button">清空选择</button><div><button id="notebook-cancel" class="dialog-cancel">取消</button><button id="notebook-apply" class="dialog-apply">应用选择</button></div></div>
+</dialog>
+<dialog id="hidden-dialog" class="notebook-dialog" aria-labelledby="hidden-title">
+  <div class="dialog-heading"><div><h2 id="hidden-title">隐藏内容</h2><p>勾选不参与图谱展示的笔记。隐藏父笔记会一并隐藏下级，原文仍保留在思源。</p></div><button id="hidden-close" class="icon-button" aria-label="关闭隐藏内容">×</button></div>
+  <input id="hidden-search" class="hidden-search" type="search" placeholder="搜索笔记名称或路径…" aria-label="搜索可隐藏的笔记">
+  <label class="check-row"><input id="hidden-only" type="checkbox"> 只看已隐藏内容</label>
+  <div id="hidden-list" class="notebook-list"></div>
+  <p id="hidden-count" class="dialog-hint" aria-live="polite"></p><p id="hidden-error" class="error-message" hidden></p>
+  <div class="dialog-actions"><button id="hidden-restore" class="text-button">恢复当前范围</button><div><button id="hidden-cancel" class="dialog-cancel">取消</button><button id="hidden-apply" class="dialog-apply">应用隐藏</button></div></div>
+</dialog>
+<dialog id="workspace-dialog" class="notebook-dialog workspace-dialog" aria-labelledby="workspace-title">
+  <div class="dialog-heading"><div><h2 id="workspace-title">视角与备份</h2><p>保存常用展示方式，下次继续上次的位置。这里管理图谱设置，笔记正文仍由思源保存与备份。</p></div><button id="workspace-close" class="icon-button" aria-label="关闭视角与备份">×</button></div>
+  <h3 class="section-heading">常用视角</h3><div class="profile-editor"><input id="profile-name" type="text" maxlength="60" placeholder="例如：质量工作、求职相关" aria-label="视角名称"><button id="profile-save" class="dialog-apply">保存当前视角</button></div><div id="profile-list" class="profile-list"></div>
+  <h3 class="section-heading">设置备份与恢复</h3><p class="preview-placeholder">包含笔记本选择、隐藏规则、显示偏好、常用视角及上次位置。恢复会替换这些设置，原笔记不变。</p><div class="backup-actions"><button id="settings-export" class="dialog-cancel">导出设置备份</button><button id="settings-pick" class="dialog-cancel">选择备份文件</button><input id="settings-file" type="file" accept=".json,application/json" hidden></div><p id="import-summary" class="dialog-hint"></p><button id="settings-restore" class="dialog-apply" disabled>恢复这份备份</button><p id="workspace-status" class="dialog-hint" role="status"></p><p id="workspace-error" class="error-message" hidden></p>
+</dialog>
+<script src="core.js?v=0.7.0"></script><script src="selection.js?v=0.7.0"></script><script src="references.js?v=0.7.0"></script><script src="visibility.js?v=0.7.0"></script><script src="workspace.js?v=0.7.0"></script><script src="atlas.js?v=0.7.0"></script>
+</body></html>
