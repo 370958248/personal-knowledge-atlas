@@ -62,7 +62,7 @@ python build.py
 
 命令会在仓库根目录生成 `package.zip`。该文件是安装包；源代码压缩包不能直接替代它。
 
-正式发布前，确保 `plugin.json` 中作者与仓库 URL 对应实际维护者，仓库名与插件 `name` 一致；本准备版预设仓库为 `370958248/personal-knowledge-atlas`。
+发布时，确保 `plugin.json` 中作者与仓库 URL 对应实际维护者，仓库名与插件 `name` 一致。本插件仓库为 [370958248/personal-knowledge-atlas](https://github.com/370958248/personal-knowledge-atlas)。
 
 ## License
 
