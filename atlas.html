@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>个人知识图谱</title><link rel="stylesheet" href="atlas.css?v=0.7.0"></head>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>图谱</title><link rel="stylesheet" href="atlas.css?v=0.7.1"></head>
 <body>
 <main class="atlas-app">
   <header class="app-header">
-    <div class="brand"><span class="brand-icon">✣</span><div><h1>个人知识图谱</h1><p><span id="scope-subtitle">未选择笔记本</span> ／ 文档层级视图</p></div></div>
+    <div class="brand"><span class="brand-icon">✣</span><div><h1>图谱</h1><p><span id="scope-subtitle">未选择笔记本</span> ／ 文档层级视图</p></div></div>
     <div class="header-actions"><button id="choose-notebooks-header" class="header-notebooks" aria-haspopup="dialog">笔记本</button><button id="manage-hidden-header" class="header-notebooks" aria-haspopup="dialog" disabled>隐藏</button><button id="workspace-open" class="settings-button" aria-haspopup="dialog">视角与备份</button><span class="connection" id="connection">正在连接思源</span><button id="theme" class="icon-button" aria-label="切换明暗主题" title="切换明暗主题">◐</button><button id="refresh" class="refresh-button">↻ <span>刷新</span></button></div>
   </header>
   <section class="workspace">
@@ -48,5 +48,5 @@
   <h3 class="section-heading">常用视角</h3><div class="profile-editor"><input id="profile-name" type="text" maxlength="60" placeholder="例如：质量工作、求职相关" aria-label="视角名称"><button id="profile-save" class="dialog-apply">保存当前视角</button></div><div id="profile-list" class="profile-list"></div>
   <h3 class="section-heading">设置备份与恢复</h3><p class="preview-placeholder">包含笔记本选择、隐藏规则、显示偏好、常用视角及上次位置。恢复会替换这些设置，原笔记不变。</p><div class="backup-actions"><button id="settings-export" class="dialog-cancel">导出设置备份</button><button id="settings-pick" class="dialog-cancel">选择备份文件</button><input id="settings-file" type="file" accept=".json,application/json" hidden></div><p id="import-summary" class="dialog-hint"></p><button id="settings-restore" class="dialog-apply" disabled>恢复这份备份</button><p id="workspace-status" class="dialog-hint" role="status"></p><p id="workspace-error" class="error-message" hidden></p>
 </dialog>
-<script src="core.js?v=0.7.0"></script><script src="selection.js?v=0.7.0"></script><script src="references.js?v=0.7.0"></script><script src="visibility.js?v=0.7.0"></script><script src="workspace.js?v=0.7.0"></script><script src="atlas.js?v=0.7.0"></script>
+<script src="core.js?v=0.7.1"></script><script src="selection.js?v=0.7.1"></script><script src="references.js?v=0.7.1"></script><script src="visibility.js?v=0.7.1"></script><script src="workspace.js?v=0.7.1"></script><script src="atlas.js?v=0.7.1"></script>
 </body></html>

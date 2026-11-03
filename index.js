@@ -19,8 +19,8 @@ module.exports = class KnowledgeAtlas extends Plugin {
       type: TYPE,
       init() {
         const frame = document.createElement('iframe');
-        frame.src = '/plugins/' + plugin.name + '/atlas.html?v=0.7.0';
-        frame.title = '个人知识图谱';
+        frame.src = '/plugins/' + plugin.name + '/atlas.html?v=0.7.1';
+        frame.title = '图谱';
         frame.style.cssText = 'border:0;width:100%;height:100%;display:block;min-height:300px;background:#f5f7fb';
         this.element.style.cssText = 'height:100%;overflow:hidden';
         this.element.replaceChildren(frame);
@@ -61,10 +61,10 @@ module.exports = class KnowledgeAtlas extends Plugin {
       }
     };
     this.eventBus.on('ws-main', this.refreshHandler);
-    this.addCommand({ langKey:'openPersonalAtlas', langText:'打开个人知识图谱', hotkey:'⌥⇧K', callback:() => this.openAtlas() });
+    this.addCommand({ langKey:'openPersonalAtlas', langText:'打开图谱', hotkey:'⌥⇧K', callback:() => this.openAtlas() });
   }
   onLayoutReady() {
-    this.addTopBar({icon:'iconPersonalAtlas', title:'个人知识图谱', position:'right', callback:() => this.openAtlas()});
+    this.addTopBar({icon:'iconPersonalAtlas', title:'图谱', position:'right', callback:() => this.openAtlas()});
   }
   flushBackup(){
     const pending=this.pendingBackup;if(!pending)return;this.pendingBackup=null;
@@ -77,7 +77,7 @@ module.exports = class KnowledgeAtlas extends Plugin {
         return;
       }
     }
-    openTab({app:this.app, custom:{id:this.name + TYPE, icon:'iconPersonalAtlas', title:'个人知识图谱'}});
+    openTab({app:this.app, custom:{id:this.name + TYPE, icon:'iconPersonalAtlas', title:'图谱'}});
   }
   onunload() {
     clearTimeout(this.backupTimer);this.flushBackup();
