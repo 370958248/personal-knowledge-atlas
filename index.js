@@ -19,7 +19,7 @@ module.exports = class KnowledgeAtlas extends Plugin {
       type: TYPE,
       init() {
         const frame = document.createElement('iframe');
-        frame.src = '/plugins/' + plugin.name + '/atlas.html?v=0.7.1';
+        frame.src = '/plugins/' + plugin.name + '/atlas.html?v=0.8.4';
         frame.title = '图谱';
         frame.style.cssText = 'border:0;width:100%;height:100%;display:block;min-height:300px;background:#f5f7fb';
         this.element.style.cssText = 'height:100%;overflow:hidden';
@@ -42,7 +42,7 @@ module.exports = class KnowledgeAtlas extends Plugin {
           if (!/^\d{14}-[a-z0-9]{7}$/.test(id || '')) return;
           try {
             const result = await fetch('/api/block/getBlockInfo', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id}) }).then(r => r.json());
-            if (result.code !== 0 || !selectedBooks().has(result.data?.box) || result.data.rootID !== id) throw new Error('此笔记不在当前选择的笔记本中');
+            if (result.code !== 0 || !selectedBooks().has(result.data?.box) || result.data.rootID !== (event.data.rootID || id)) throw new Error('此笔记不在当前选择的笔记本中');
             openTab({ app: plugin.app, doc: {id}, position: 'right', keepCursor: false });
           } catch (error) { showMessage('打开笔记失败：' + error.message, 5000, 'error'); }
         };
@@ -57,7 +57,7 @@ module.exports = class KnowledgeAtlas extends Plugin {
     });
     this.refreshHandler = event => {
       if (['transactions', 'rename', 'moveDoc', 'removeDoc', 'createDoc', 'reloadFiletree', 'refreshFiletree'].includes(event.detail?.cmd)) {
-        for (const view of this.views) view.atlasFrame?.contentWindow?.postMessage({type:'personal-atlas-refresh'}, location.origin);
+        for (const view of this.views) view.atlasFrame?.contentWindow?.postMessage({type:'personal-atlas-refresh',command:event.detail.cmd}, location.origin);
       }
     };
     this.eventBus.on('ws-main', this.refreshHandler);

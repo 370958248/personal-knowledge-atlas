@@ -1,6 +1,6 @@
 'use strict';
 (() => {
-  const C=window.AtlasCore,S=window.AtlasSelection,R=window.AtlasReferences,H=window.AtlasVisibility,W=window.AtlasWorkspace,NS='http://www.w3.org/2000/svg';
+  const C=window.AtlasCore,S=window.AtlasSelection,R=window.AtlasReferences,H=window.AtlasVisibility,W=window.AtlasWorkspace,L=window.AtlasLoader,NS='http://www.w3.org/2000/svg';
   const $=id=>document.getElementById(id);
   const state={root:null,map:new Map(),focus:null,selected:null,view:'radial',query:'',collapsed:new Set(),treeOpen:new Set(),zoom:1,panX:0,panY:0,baseScale:1,loading:false,generation:0,previewGeneration:0,drag:null,visible:[],destroyed:false,catalog:[],selection:S.read(localStorage),loadController:null,previewController:null};
   const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};
@@ -10,9 +10,9 @@
   const isDocument=node=>node?.kind==='document';
   const count=node=>node.documentCount??node.descendants;
   const selectedNow=()=>new Set(S.read(localStorage));
-  Object.assign(state,{references:[],allReferences:[],rawRoot:null,rawMap:new Map(),hidden:H.read(localStorage),hideDraft:null,hideLimit:200,referenceLimited:false,referenceError:'',showReferences:true,selectedReferences:false,labelMode:'all',sunLabelKey:null,networkLabelKey:null,networkGroups:new Map()});
-  let refreshTimer,searchTimer,resizeTimer;
-  let sessionTimer,historyTimer,restorePending=W.current(localStorage),workspaceLibrary=W.read(localStorage),applyingSnapshot=false,importData=null,importGeneration=0,lastWheel=0,sessionDirty=false;
+  Object.assign(state,{references:[],allReferences:[],rawRoot:null,rawMap:new Map(),hidden:H.read(localStorage),referenceLimited:false,referenceError:'',referenceLoading:false,referenceController:null,referenceGeneration:0,referenceKey:'',referenceHasData:false,referenceDirty:true,referenceVersion:0,referenceTask:null,referenceStamp:null,showReferences:true,selectedReferences:false,labelMode:'all',sunLabelKey:null,networkLabelKey:null,networkGroups:new Map()});
+  let refreshTimer,searchTimer,resizeTimer,referenceRetryTimer;
+  let sessionTimer,historyTimer,restorePending=W.current(localStorage),workspaceLibrary=W.read(localStorage),applyingSnapshot=false,lastWheel=0,sessionDirty=false;
   const navigation=W.history();
   try{const saved=JSON.parse(localStorage.getItem('personal-atlas-preferences')||'{}');if(['radial','grouped','sunburst'].includes(saved.view))state.view=saved.view;if(saved.theme==='dark')document.documentElement.dataset.theme='dark';if(typeof saved.showReferences==='boolean')state.showReferences=saved.showReferences;if(typeof saved.selectedReferences==='boolean')state.selectedReferences=saved.selectedReferences;if(['all','auto'].includes(saved.labelMode))state.labelMode=saved.labelMode;}catch{}
   function preferences(){try{localStorage.setItem('personal-atlas-preferences',JSON.stringify({view:state.view,theme:document.documentElement.dataset.theme||'light',showReferences:state.showReferences,selectedReferences:state.selectedReferences,labelMode:state.labelMode}));}catch{}}
@@ -22,13 +22,13 @@
   }
   function navButtons(){$('nav-back').disabled=!navigation.canBack;$('nav-forward').disabled=!navigation.canForward;}
   function remember(){if(!state.root||state.loading||applyingSnapshot||state.destroyed)return;navigation.push(capture());navButtons();}
-  function notifyBackup(){if(window.parent!==window)window.parent.postMessage({type:'personal-atlas-settings-changed',settings:W.envelope(state.root?capture():W.current(localStorage),W.read(localStorage))},location.origin);else $('workspace-status').textContent='设置已在本机记住；可导出文件备份。';}
+  function notifyBackup(){if(window.parent!==window)window.parent.postMessage({type:'personal-atlas-settings-changed',settings:W.envelope(state.root?capture():W.current(localStorage),W.read(localStorage))},location.origin);}
   function saveSession(rememberHistory=true){
     if(!state.root||state.loading||applyingSnapshot||state.destroyed)return;
     try{const current=capture();workspaceLibrary=W.save(localStorage,{profiles:W.read(localStorage).profiles,last:current});clearTimeout(sessionTimer);sessionDirty=false;if(rememberHistory)navigation.push(current);navButtons();notifyBackup();}catch(error){workspaceError(error.message);}
   }
   function scheduleSession(immediateHistory=false){sessionDirty=true;clearTimeout(sessionTimer);sessionTimer=setTimeout(()=>saveSession(),320);if(immediateHistory){clearTimeout(historyTimer);historyTimer=setTimeout(remember,0);}}
-  function workspaceError(message){$('workspace-error').textContent=message;$('workspace-error').hidden=false;}
+  function workspaceError(message){$('updated').textContent=message;$('updated').title=message;}
   function restoreView(value){
     const s=W.snapshot(value);state.view=s.view;state.labelMode=s.labelMode;state.showReferences=s.showReferences;state.selectedReferences=s.selectedReferences;
     document.documentElement.dataset.theme=s.theme;$('depth').value=String(s.depth);$('limit').value=String(s.limit);$('auto').checked=s.auto;state.query=s.query;$('search').value=s.query;
@@ -44,8 +44,8 @@
     try{workspaceLibrary=W.commit(localStorage,s,library);}catch(error){workspaceError(error.message);return false;}
     clearTimeout(sessionTimer);clearTimeout(historyTimer);applyingSnapshot=true;state.selection=s.selection;state.hidden=new Set(s.hidden);
     try{
-      if(same){projectVisibility();restoreView(s);}else{restorePending=s;resetScope();await load();}
-      $('hidden-dialog').close();state.hideDraft=null;
+      if(same&&!needsVisibleLoad()){projectVisibility();restoreView(s);readReferences();}else{restorePending=s;resetScope();await load();}
+      scopePicker.close();
     }finally{applyingSnapshot=false;}
     saveSession(rememberHistory);return Boolean(state.root);
   }
@@ -54,34 +54,61 @@
     // Navigation history follows browsing locations; it does not undo hidden rules.
     await applySnapshot({...target,hidden:[...state.hidden]},{rememberHistory:false});if(state.root)navigation.replace(capture());navButtons();
   }
-  function renderProfiles(){
-    workspaceLibrary=W.read(localStorage);const list=$('profile-list');list.replaceChildren();
-    for(const profile of workspaceLibrary.profiles){const row=el('div','profile-row'),name=el('button','profile-name',profile.name),remove=el('button','profile-delete','删除');row.dataset.profileId=profile.id;name.title='应用视角：'+profile.name;name.onclick=async()=>{if(await applySnapshot(profile.snapshot))$('workspace-dialog').close();};remove.setAttribute('aria-label','删除视角 '+profile.name);remove.onclick=()=>{try{workspaceLibrary=W.save(localStorage,{...W.read(localStorage),profiles:W.read(localStorage).profiles.filter(p=>p.id!==profile.id)});renderProfiles();notifyBackup();}catch(error){workspaceError(error.message);}};row.append(name,remove);list.append(row);}
-    if(!workspaceLibrary.profiles.length)list.append(el('p','preview-placeholder','把当前范围、隐藏规则和位置保存成一个视角，之后可以一键切换。'));
-    profileSaveLabel();
-  }
-  function profileSaveLabel(){const name=$('profile-name').value.trim();$('profile-save').textContent=W.read(localStorage).profiles.some(p=>p.name===name)?'更新此视角':'保存当前视角';}
-  function openWorkspace(){
-    $('workspace-error').hidden=true;importData=null;importGeneration++;$('settings-file').value='';$('import-summary').textContent='';$('settings-restore').disabled=true;renderProfiles();$('workspace-dialog').showModal();
-  }
-  function saveProfile(){
-    if(!state.root||state.loading){workspaceError('请等待图谱加载完成后保存。');return;}
-    const name=$('profile-name').value.trim();if(!name){workspaceError('请给这个视角起个名字。');return;}
-    try{const lib=W.read(localStorage),existing=lib.profiles.find(p=>p.name===name),profile={id:existing?.id||'view-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8),name,snapshot:capture()};workspaceLibrary=W.save(localStorage,{profiles:existing?lib.profiles.map(p=>p.id===existing.id?profile:p):[...lib.profiles,profile],last:profile.snapshot});$('workspace-error').hidden=true;$('workspace-status').textContent='已保存视角：'+name;renderProfiles();notifyBackup();}catch(error){workspaceError(error.message);}
-  }
-  function exportSettings(){
-    try{const data=W.envelope(state.root?capture():W.current(localStorage),W.read(localStorage)),text=JSON.stringify(data,null,2);W.parse(text);const stamp=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(new Date()).replace(/\D/g,'');const url=URL.createObjectURL(new Blob([text],{type:'application/json;charset=utf-8'})),link=el('a');link.href=url;link.download='图谱设置备份_'+stamp+'.json';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);$('workspace-status').textContent='已导出图谱设置与常用视角。';}catch(error){workspaceError(error.message);}
-  }
   async function api(endpoint,body,signal,referenceScope){
     const allowed=['/api/notebook/lsNotebooks','/api/filetree/listDocsByPath','/api/block/getBlockInfo','/api/block/getBlockKramdown','/api/query/sql'];
     if(!allowed.includes(endpoint))throw new Error('图谱只读取文档，不修改笔记');
-    if(endpoint==='/api/filetree/listDocsByPath'&&!selectedNow().has(body.notebook))throw new Error('笔记本不在当前选择范围');
-    if(endpoint==='/api/query/sql'&&(!referenceScope||referenceScope.books.some(id=>!selectedNow().has(id))||body.stmt!==R.query(referenceScope.books,referenceScope.cursor)))throw new Error('双链读取范围不符');
+    if(endpoint==='/api/filetree/listDocsByPath'){
+      if(referenceScope?.picker){
+        if(body.notebook!==referenceScope.node.notebookId || body.path!==referenceScope.node.path || !scopePicker.allows(referenceScope.node,referenceScope.picker))throw Error('目录选择范围已变化');
+      }else if(!selectedNow().has(body.notebook))throw new Error('笔记本不在当前选择范围');
+    }
+    if(endpoint==='/api/query/sql'&&(!referenceScope||referenceScope.books.some(id=>!selectedNow().has(id))||JSON.stringify(referenceScope.excluded||[])!==JSON.stringify(referenceExclusions())||body.stmt!==R.query(referenceScope.books,referenceScope.cursor,referenceScope.excluded)))throw new Error('双链读取范围不符');
     const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal});
     if(!response.ok)throw new Error('思源连接失败（'+response.status+'）');
     const result=await response.json();if(result.code!==0)throw new Error(result.msg||'思源未返回数据');return result.data;
   }
-  async function load(silent=false){
+  function referenceExclusions(){
+    return [...state.rawMap.values()].filter(n=>isDocument(n)&&state.hidden.has(n.id)&&!H.covered(n.parent,state.hidden))
+      .map(n=>({box:n.notebookId,path:n.path})).sort((a,b)=>a.box.localeCompare(b.box)||a.path.localeCompare(b.path));
+  }
+  function cancelReferences(){state.referenceController?.abort();state.referenceGeneration++;state.referenceLoading=false;state.referenceTask=null;clearTimeout(referenceRetryTimer);}
+  function markReferencesDirty(){state.referenceDirty=true;state.referenceVersion++;}
+  function needsVisibleLoad(){return [...state.rawMap.values()].some(n=>n.childrenLoaded===false&&!H.covered(n,state.hidden));}
+  async function readReferences({force=false}={}){
+    if(!state.root)return;
+    const books=S.selectedBooks(state.catalog,state.selection).map(b=>b.id).sort(),excluded=referenceExclusions();
+    const documents=[...state.map.values()].filter(isDocument).map(n=>n.id).sort();
+    const key=JSON.stringify([books,excluded,documents]);
+    if(key!==state.referenceKey){cancelReferences();state.referenceKey=key;markReferencesDirty();}
+    if(force)markReferencesDirty();
+    // Visibility, focus, layout and "selected note only" are presentation choices.
+    // They reuse the same complete reference result for the selected scope.
+    if(!state.showReferences||state.referenceHasData&&!state.referenceDirty){drawReferences();renderReferenceDetails();return;}
+    if(state.referenceTask){drawReferences();renderReferenceDetails();return state.referenceTask;}
+    const controller=new AbortController();state.referenceController=controller;
+    const revision=state.referenceGeneration,version=state.referenceVersion,map=state.map;
+    const current=()=>!controller.signal.aborted&&revision===state.referenceGeneration&&key===state.referenceKey&&!state.destroyed;
+    state.referenceLoading=true;state.referenceError='';drawReferences();renderReferenceDetails();
+    const task=(async()=>{
+      try{
+        const result=await R.read(books,map,(stmt,scope)=>api('/api/query/sql',{stmt},controller.signal,scope),{excluded});
+        if(!current())return;
+        state.allReferences=result.edges;state.references=H.references(result.edges,state.map);state.referenceLimited=result.limited;
+        state.referenceHasData=true;state.referenceDirty=version!==state.referenceVersion;
+      }catch(error){
+        if(!current())return;
+        // A failed background check must not discard the last usable links.
+        state.referenceError=error.message;state.referenceDirty=true;
+      }finally{
+        if(current()){
+          state.referenceLoading=false;state.referenceTask=null;drawReferences();renderReferenceDetails();
+          if(version!==state.referenceVersion&&state.showReferences){clearTimeout(referenceRetryTimer);referenceRetryTimer=setTimeout(()=>readReferences(),800);}
+        }
+      }
+    })();
+    state.referenceTask=task;return task;
+  }
+  async function load(silent=false,{referencesChanged=false}={}){
     if(state.loading&&silent)return;
     state.loadController?.abort();const controller=new AbortController();state.loadController=controller;
     state.loading=true;$('refresh').disabled=true;
@@ -91,47 +118,30 @@
       const catalog=await api('/api/notebook/lsNotebooks',{},controller.signal);
       if(!Array.isArray(catalog?.notebooks))throw new Error('无法取得笔记本列表');
       state.catalog=catalog.notebooks.filter(book=>S.valid(book.id));
-      const selectedIds=state.selection.slice(),selectedSet=new Set(selectedIds);
-      const books=S.selectedBooks(state.catalog,selectedIds);
-      const roots=books.map(book=>({id:book.id,title:book.name||'未命名笔记本',notebookId:book.id,kind:'notebook',path:'/',children:[]}));
-      const root=roots.length===1?roots[0]:{id:'atlas-root',title:'我的知识图谱',kind:'collection',children:roots};
-      const seen=new Set([root.id,...roots.map(n=>n.id)]);
-      async function branch(parent){
-        if(!selectedSet.has(parent.notebookId))throw new Error('笔记本范围不符');
-        const result=await api('/api/filetree/listDocsByPath',{notebook:parent.notebookId,path:parent.path,maxListCount:100000,ignoreMaxListHint:true},controller.signal);
-        if(result.box&&result.box!==parent.notebookId)throw new Error('返回数据不属于所选笔记本');
-        if(!Array.isArray(result.files))throw new Error('文档目录格式不正确');
-        for(const file of result.files){
-          if(!valid(file.id)||seen.has(file.id))continue;
-          seen.add(file.id);
-          if(!/^\/(?:\d{14}-[a-z0-9]{7}\/)*\d{14}-[a-z0-9]{7}\.sy$/.test(file.path))throw new Error('文档路径格式不正确');
-          const node={id:file.id,title:file.name||'未命名',notebookId:parent.notebookId,kind:'document',path:file.path,children:[],updated:file.hMtime||'',childCount:Number(file.subFileCount||0)};
-          parent.children.push(node);
-        }
-        for(const child of parent.children)if(child.childCount>0)await branch(child);
-        if(parent.childCount&&parent.children.length<parent.childCount)throw new Error('思源返回的目录不完整，请稍后刷新');
-      }
-      for(const notebook of roots)await branch(notebook);
+      const selectedIds=state.selection.slice(),books=S.selectedBooks(state.catalog,selectedIds);
+      const root=await L.read(books,{
+        hidden:state.hidden,signal:controller.signal,
+        request:(parent,signal)=>api('/api/filetree/listDocsByPath',{notebook:parent.notebookId,path:parent.path,maxListCount:100000,ignoreMaxListHint:true},signal),
+        onProgress:({requests})=>{if(!silent&&generation===state.generation)$('connection').textContent='正在读取目录 · '+requests+' 处';}
+      });
       if(generation!==state.generation||state.destroyed)return;
-      const signature=JSON.stringify(root,(k,v)=>k==='updated'?undefined:v);
-      const changed=signature!==state.signature;
-      const map=C.indexTree(root);let references={edges:[],limited:false},referenceError='';
-      try{references=await R.read(books.map(b=>b.id),map,(stmt,scope)=>api('/api/query/sql',{stmt},controller.signal,scope));}
-      catch(error){if(error.name==='AbortError')throw error;referenceError=error.message;}
-      if(generation!==state.generation||state.destroyed)return;
-      state.allReferences=references.edges;state.referenceLimited=references.limited;state.referenceError=referenceError;
-      state.rawRoot=root;state.rawMap=map;state.signature=signature;projectVisibility();
+      const signature=JSON.stringify(root,(k,v)=>k==='updated'?undefined:v),changed=signature!==state.signature;
+      state.rawRoot=root;state.rawMap=C.indexTree(root);state.signature=signature;
+      const stamp=JSON.stringify([...state.rawMap.values()].filter(isDocument).map(n=>[n.id,n.updated]).sort((a,b)=>a[0].localeCompare(b[0])));
+      if(stamp!==state.referenceStamp||referencesChanged){markReferencesDirty();state.referenceStamp=stamp;}
+      projectVisibility();
       state.treeOpen.add(state.root.id);
-      $('connection').classList.remove('error');$('connection').textContent='已连接思源';
-      updateScope(books);
+      $('connection').classList.remove('error');$('connection').textContent='已连接思源';updateScope(books);
       $('updated').textContent='最近更新 '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})+' · 本地读取';
       if(restorePending){const saved=restorePending;restorePending=null;restoreView(saved);}else if(changed||!silent){renderTree();renderMap(true);renderDetails();}else{drawReferences();renderReferenceDetails();if(isDocument(state.selected))renderPreview(state.selected);}
-      if(!roots.length){$('empty').hidden=false;$('empty').textContent=selectedIds.length?'所选笔记本当前不可用。请打开、解锁笔记本，或重新选择。':'尚未选择笔记本。点击左上方“展示范围”开始选择。';}
+      if(!books.length){$('empty').hidden=false;$('empty').textContent=selectedIds.length?'所选笔记本当前不可用。请打开、解锁笔记本，或重新选择。':'尚未选择笔记本。点击左上方“展示范围”开始选择。';}
       else if(!state.query)$('empty').hidden=true;
       document.body.dataset.ready='true';
+      // Unchanged automatic checks reuse references; explicit refresh can recheck them.
+      readReferences({force:!silent});
     }catch(error){
       if(error.name==='AbortError'||generation!==state.generation)return;
-      $('connection').classList.add('error');$('connection').textContent='连接待恢复';
+      controller.abort();$('connection').classList.add('error');$('connection').textContent='连接待恢复';
       if(!state.root){$('empty').hidden=false;$('empty').textContent=error.message+'\n请确认思源已打开，且所选笔记本处于打开状态。';$('details').replaceChildren(el('h2','detail-title','尚未连接'),el('p','error-message',error.message));}
       $('graph-count').textContent=error.message;
     }finally{if(generation===state.generation){state.loading=false;$('refresh').disabled=false;if(state.root){remember();if(!W.read(localStorage).last||sessionDirty)scheduleSession();}}}
@@ -143,9 +153,9 @@
     $('choose-notebooks').title=books.map(book=>book.name).join('、')||'选择要展示的笔记本';
   }
   function resetScope(){
-    state.loadController?.abort();state.previewController?.abort();state.generation++;state.previewGeneration++;
+    state.loadController?.abort();state.previewController?.abort();cancelReferences();state.generation++;state.previewGeneration++;
     state.root=null;state.focus=null;state.selected=null;state.map=new Map();state.visible=[];state.signature=null;
-    state.rawRoot=null;state.rawMap=new Map();state.allReferences=[];state.hideDraft=null;$('hidden-dialog').close();updateHiddenCount();
+    state.rawRoot=null;state.rawMap=new Map();state.allReferences=[];state.referenceKey='';state.referenceHasData=false;state.referenceDirty=true;state.referenceStamp=null;state.referenceVersion=0;scopePicker.close();updateHiddenCount();
     state.networkGroups=new Map();state.networkLabelKey=null;state.sunLabelKey=null;
     state.references=[];state.referenceLimited=false;state.referenceError='';$('reference-status').textContent='';
     state.query='';$('search').value='';$('tree').replaceChildren();$('viewport').replaceChildren();$('breadcrumbs').replaceChildren();
@@ -160,67 +170,27 @@
     updateHiddenCount();
   }
   function updateHiddenCount(){
-    const hidden=state.rawRoot?count(state.rawRoot)-count(state.root):0;
-    $('manage-hidden').textContent='隐藏内容'+(hidden?' · '+hidden+' 篇':'');$('manage-hidden').disabled=!state.rawRoot;
-    $('manage-hidden-header').disabled=!state.rawRoot;
+    const hidden=referenceExclusions().length;
+    $('scope-hidden-count').textContent=hidden?'已隐藏 '+hidden+' 处（含下级） · 点击调整':'选择笔记本，也可隐藏子目录';
+    $('choose-notebooks-header').title=hidden?'展示范围与隐藏 · 已隐藏 '+hidden+' 处（含下级）':'展示范围与隐藏';
   }
   function applyVisibility(){
+    if(state.loading){restorePending=state.root?capture():W.current(localStorage);load();return;}
     if(!state.rawRoot)return;
+    if(needsVisibleLoad()){restorePending=capture();load();return;}
     state.previewController?.abort();state.previewGeneration++;$('tooltip').hidden=true;
-    projectVisibility();renderTree();renderMap(true);renderDetails();
+    projectVisibility();renderTree();renderMap(true);renderDetails();readReferences();
   }
   function saveHidden(ids){
-    try{state.hidden=H.write(localStorage,ids);return true;}catch{$('hidden-error').textContent='无法保存隐藏设置，请检查本地存储是否可用。';$('hidden-error').hidden=false;return false;}
+    try{state.hidden=H.write(localStorage,ids);return true;}catch{$('notebook-selection-error').textContent='无法保存隐藏设置，请检查本地存储是否可用。';$('notebook-selection-error').hidden=false;return false;}
   }
   function hideNote(node){
     if(!isDocument(node)||!state.map.has(node.id))return;
     const draft=new Set(state.hidden);draft.add(node.id);
-    if(saveHidden(draft))applyVisibility();else{hiddenDialog(draft);$('hidden-error').textContent='无法保存隐藏设置，请检查本地存储是否可用。';$('hidden-error').hidden=false;}
+    if(saveHidden(draft))applyVisibility();else{hiddenDialog(draft);}
   }
-  function hiddenDialog(draft){
-    if(!state.rawRoot)return;
-    state.hideDraft=draft||new Set(state.hidden);state.hideLimit=200;$('hidden-search').value='';$('hidden-only').checked=false;
-    $('hidden-error').hidden=true;renderHiddenList();$('hidden-dialog').showModal();
-  }
-  function renderHiddenList(){
-    if(!state.hideDraft||!state.rawRoot)return;
-    const list=$('hidden-list');list.replaceChildren();
-    const query=$('hidden-search').value.trim().toLocaleLowerCase(),only=$('hidden-only').checked,draft=state.hideDraft;
-    const documents=[...state.rawMap.values()].filter(isDocument);
-    const matches=documents.filter(n=>(!query||C.ancestors(n).map(p=>p.title).join(' / ').toLocaleLowerCase().includes(query))&&(!only||H.covered(n,draft)));
-    for(const node of matches.slice(0,state.hideLimit)){
-      const inherited=H.covered(node.parent,draft),row=el('label','notebook-option hidden-option'),check=el('input');check.type='checkbox';check.value=node.id;check.checked=H.covered(node,draft);check.disabled=inherited;
-      check.setAttribute('aria-label','隐藏 '+node.title);if(inherited)check.title='随上级隐藏，取消上级勾选后可单独设置';
-      row.style.paddingLeft=(Math.min(node.depth-1,5)*12+4)+'px';
-      const text=el('span','notebook-option-text');text.append(el('strong','',node.title),el('small','',C.ancestors(node).slice(0,-1).map(p=>p.title).join(' / ')+(inherited?' · 随上级隐藏':count(node)?' · 含下级 '+count(node)+' 篇':'')));
-      row.append(check,text);list.append(row);check.onchange=()=>{check.checked?draft.add(node.id):draft.delete(node.id);renderHiddenList();const next=list.querySelector('input[value="'+node.id+'"]');if(next)next.focus();};
-    }
-    if(!matches.length)list.append(el('p','preview-placeholder',documents.length?'没有匹配的笔记。':'当前展示范围没有笔记。'));
-    if(matches.length>state.hideLimit){const more=el('button','text-button','再显示 '+Math.min(200,matches.length-state.hideLimit)+' 项');more.onclick=()=>{state.hideLimit+=200;renderHiddenList();};list.append(more);}
-    $('hidden-count').textContent='当前范围将隐藏 '+documents.filter(n=>H.covered(n,draft)).length+' / '+documents.length+' 篇笔记';
-  }
-  async function notebookDialog(){
-    const dialog=$('notebook-dialog'),list=$('notebook-list');list.replaceChildren(el('p','preview-placeholder','正在读取笔记本列表…'));
-    $('notebook-selection-error').hidden=true;$('notebook-apply').disabled=true;
-    if(!dialog.open)dialog.showModal();
-    try{
-      const data=await api('/api/notebook/lsNotebooks',{});state.catalog=(data.notebooks||[]).filter(book=>S.valid(book.id));
-      list.replaceChildren();const wanted=selectedNow();
-      for(const book of state.catalog){
-        const row=el('label','notebook-option'),checkbox=el('input');checkbox.type='checkbox';checkbox.value=book.id;checkbox.checked=wanted.has(book.id);checkbox.disabled=!S.available(book);
-        const text=el('span','notebook-option-text');text.append(el('strong','',book.name||'未命名笔记本'),el('small','',book.closed?'已关闭，请先在思源中打开':book.encrypted&&!book.unlocked?'已锁定，请先解锁':'可展示'));
-        row.append(checkbox,text);list.append(row);checkbox.onchange=selectionCount;
-      }
-      if(!state.catalog.length)list.append(el('p','preview-placeholder','暂未找到笔记本。'));
-      selectionCount();$('notebook-apply').disabled=false;
-    }catch(error){list.replaceChildren(el('p','error-message',error.message));}
-  }
-  function selectionCount(){const checks=[...$('notebook-list').querySelectorAll('input:checked')];$('notebook-selection-count').textContent='已勾选 '+checks.length+' 个笔记本'+(checks.some(c=>c.disabled)?'，不可用的笔记本暂不读取':'');}
-  function applySelection(){
-    const ids=[...$('notebook-list').querySelectorAll('input:checked')].map(c=>c.value);
-    try{state.selection=S.write(localStorage,ids);}catch{const error=$('notebook-selection-error');error.hidden=false;error.textContent='无法保存选择，请检查本地存储是否可用。';return;}
-    $('notebook-dialog').close();resetScope();load();
-  }
+  function notebookDialog(){return scopePicker.open();}
+  function hiddenDialog(draft){return scopePicker.open(draft);}
   function focus(node){state.focus=node;state.selected=node;state.collapsed.delete(node.id);state.query='';$('search').value='';for(const p of C.ancestors(node))state.treeOpen.add(p.id);renderTree();renderMap(true);renderDetails();}
   function select(node,{reveal=false}={}){
     state.selected=node;for(const p of C.ancestors(node))state.treeOpen.add(p.id);
@@ -257,12 +227,20 @@
     document.querySelectorAll('[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===state.view);b.setAttribute('aria-pressed',String(b.dataset.view===state.view));});
     $('label-control').hidden=false;$('label-mode').value=state.labelMode;
     renderBreadcrumbs();
-    const result=C.visibleTree(state.focus,{depth:Number($('depth').value),limit:Number($('limit').value),query:state.query,collapsed:state.collapsed,selected:state.selected});state.visible=result.nodes;
+    const depth=Number($('depth').value),limit=Number($('limit').value);
+    const result=C.visibleTree(state.focus,{depth:depth===12?0:depth,limit,query:state.query,collapsed:state.collapsed,selected:state.selected});state.visible=result.nodes;
     const viewport=$('viewport');viewport.replaceChildren();
     if(state.view==='sunburst')drawSunburst(result);else drawNetwork(result);
     drawReferences();
     const shown=result.nodes.filter(n=>n.parent&&isDocument(n.original)).length,total=count(state.focus);
-    $('graph-count').textContent='显示 '+shown+' / '+total+' 篇'+(shown<total?' · 可搜索、聚焦或增加展开范围':'');
+    const reasons=[];
+    if(state.query)reasons.push('标题筛选中');
+    if(shown<total&&!state.query){
+      if(depth!==12)reasons.push('当前 '+depth+' 层，可选全部层级');
+      if(limit&&result.nodes.length>=limit)reasons.push('达到节点上限，可选全部节点');
+      if(!reasons.length)reasons.push('部分分支已收起');
+    }
+    $('graph-count').textContent='显示 '+shown+' / '+total+' 篇'+(reasons.length?' · '+reasons.join('；'):'');
     if(state.query&&shown===0){$('empty').hidden=false;$('empty').textContent='没有匹配的笔记标题';}else $('empty').hidden=true;
     if(reset){state.zoom=1;state.panX=0;state.panY=0;}
     fitScale();transform();
@@ -280,10 +258,10 @@
     if(state.view==='grouped')C.grouped(root);else C.radial(root);
     const v=$('viewport');state.networkGroups=new Map();state.networkLabelKey=null;
     if(state.view==='grouped')root.children.filter(n=>n.children.length).forEach(n=>{const radius=Math.min(270,115+Math.sqrt(n.children.length)*10);v.append(svg('circle',{cx:n.x,cy:n.y,r:radius,fill:C.color(n),stroke:C.color(n),class:'graph-cluster'}));});
-    nodes.filter(n=>n.parent).forEach(n=>{const p=n.parent;v.append(svg('path',{d:`M${p.x},${p.y}Q${(p.x+n.x)*.38},${(p.y+n.y)*.38} ${n.x},${n.y}`,class:'graph-link'}));});
+    for(const n of nodes)n.nodeRadius=!n.parent?25:n.children.length?Math.min(16,8+Math.sqrt(n.descendants)*.45):4;
+    nodes.filter(n=>n.parent).forEach(n=>v.append(svg('path',{d:C.hierarchyCurve(n.parent,n),class:'graph-link','data-parent-id':n.parent.id,'data-child-id':n.id})));
     nodes.forEach(n=>{
-      const rootNode=!n.parent;const radius=rootNode?25:n.children.length?Math.min(16,8+Math.sqrt(n.descendants)*.45):4;
-      n.nodeRadius=radius;
+      const rootNode=!n.parent,radius=n.nodeRadius;
       const g=svg('g',{transform:`translate(${n.x},${n.y})`,class:'graph-node'+(state.selected?.id===n.id?' selected':'')});
       if(rootNode)g.append(svg('circle',{r:33,fill:'none',stroke:'#4779bd','stroke-opacity':.16,'stroke-width':1}));
       g.append(svg('circle',{r:radius,fill:rootNode?'#365775':C.color(n),'fill-opacity':rootNode?1:n.children.length?.95:.6}));
@@ -368,13 +346,15 @@
     const status=$('reference-status');
     $('show-references').checked=state.showReferences;$('selected-references').checked=state.selectedReferences;$('selected-references').disabled=!state.showReferences;
     status.title='';
-    if(state.referenceError){status.textContent='双链暂不可用';status.title=state.referenceError;return;}
     if(!state.showReferences){status.textContent='双链已隐藏';return;}
+    if(state.referenceLoading&&!state.referenceHasData){status.textContent='正在读取双链…';return;}
+    if(state.referenceError&&!state.referenceHasData){status.textContent='双链暂不可用';status.title=state.referenceError;return;}
     if(state.selectedReferences&&!isDocument(state.selected)){status.textContent='请选择笔记查看双链';return;}
     const selectedId=isDocument(state.selected)?state.selected.id:null;
     const shown=R.visible(state.references,state.visible,{selectedOnly:state.selectedReferences,selectedId});
     status.textContent='双链 '+shown.edges.length+' 条可见 / '+state.references.length+' 组引用'+(state.referenceLimited?'＋':'');
     status.title=state.referenceLimited?'引用较多，可缩小笔记本范围以查看完整关联。':state.references.length?'虚线箭头从引用方指向被引用方；折叠或未显示的笔记，可在右侧双链列表中查看。':'当前所选范围没有思源原生块引用。建立引用后刷新即可显示。';
+    if(state.referenceError&&state.referenceHasData)status.title+=' 后台更新暂未完成，已有双链保留。';
     if(shown.total>shown.edges.length)status.textContent+=' · 可切换为仅看当前笔记';
     if(!shown.edges.length)return;
     const defs=svg('defs',{'data-reference-defs':'true'}),marker=svg('marker',{id:'atlas-ref-arrow',viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:5,markerHeight:5,orient:'auto',markerUnits:'strokeWidth'});
@@ -396,7 +376,9 @@
   function renderReferenceDetails(){
     const host=$('reference-details'),node=state.selected;if(!host||!isDocument(node))return;
     host.replaceChildren(el('h3','section-heading','双链关系'));
-    if(state.referenceError){host.append(el('p','preview-placeholder','暂时无法取得双链，点击“刷新”重试。'));return;}
+    if(!state.showReferences){host.append(el('p','preview-placeholder','勾选“显示双链关系”后读取。'));return;}
+    if(state.referenceLoading&&!state.referenceHasData){host.append(el('p','preview-placeholder','正在读取双链，目录图谱已可使用。'));return;}
+    if(state.referenceError&&!state.referenceHasData){host.append(el('p','preview-placeholder','暂时无法取得双链，点击“刷新”重试。'));return;}
     const links=R.forNote(state.references,node.id);
     if(!links.outgoing.length&&!links.incoming.length){host.append(el('p','preview-placeholder','当前展示范围内暂无引用或反向引用。在思源中建立块引用后，刷新即可显示。'));return;}
     for(const [name,edges,field] of [['引用了',links.outgoing,'target'],['被引用',links.incoming,'source']]){
@@ -456,7 +438,7 @@
       }
       if(inCode&&code.length)host.append(el('pre','',code.join('\n')));
       if(text.split('\n').length>450)host.append(el('p','preview-placeholder','正文较长，完整内容请在思源中打开。'));
-    }catch(error){if(error.name!=='AbortError'&&id===state.previewGeneration&&$('preview'))$('preview').replaceChildren(el('p','error-message',error.message));}
+    }catch(error){if(error.name!=='AbortError'&&id===state.previewGeneration)$('preview')?.replaceChildren(el('p','error-message',error.message));}
   }
   function appendInline(host,text){
     const pattern=/\[([^\]]*)\]\(([^)]+)\)|\*\*(.+?)\*\*/g;let last=0;
@@ -471,34 +453,23 @@
       }last=m.index+m[0].length;
     }host.append(document.createTextNode(text.slice(last)));
   }
-  async function openNote(node){
+  async function openNote(node,blockId=node.id){
     if(!isDocument(node)||!valid(node.id)||!state.map.has(node.id)||!selectedNow().has(node.notebookId))return;
     try{
-      const info=await api('/api/block/getBlockInfo',{id:node.id});if(!state.map.has(node.id)||!selectedNow().has(info.box)||info.box!==node.notebookId||info.rootID!==node.id)throw new Error('此笔记已移出当前展示范围，请刷新');
-      if(window.parent!==window)window.parent.postMessage({type:'personal-atlas-open',id:node.id},location.origin);
-      else location.href='siyuan://blocks/'+node.id;
+      if(!valid(blockId))return;
+      const info=await api('/api/block/getBlockInfo',{id:blockId});if(!state.map.has(node.id)||!selectedNow().has(info.box)||info.box!==node.notebookId||info.rootID!==node.id)throw new Error('此笔记已移出当前展示范围，请刷新');
+      if(window.parent!==window)window.parent.postMessage({type:'personal-atlas-open',id:blockId,rootID:node.id},location.origin);
+      else location.href='siyuan://blocks/'+blockId;
     }catch(error){$('preview')?.replaceChildren(el('p','error-message',error.message));}
   }
   $('choose-notebooks').onclick=notebookDialog;
   $('choose-notebooks-header').onclick=notebookDialog;
-  for(const id of ['notebook-close','notebook-cancel'])$(id).onclick=()=>$('notebook-dialog').close();
-  $('notebook-clear').onclick=()=>{$('notebook-list').querySelectorAll('input').forEach(c=>{c.checked=false;});selectionCount();};
-  $('notebook-apply').onclick=applySelection;
-  $('workspace-open').onclick=openWorkspace;$('workspace-close').onclick=()=>$('workspace-dialog').close();$('profile-name').oninput=profileSaveLabel;$('profile-save').onclick=saveProfile;
-  $('settings-export').onclick=exportSettings;$('settings-pick').onclick=()=>$('settings-file').click();
-  $('settings-file').onchange=async()=>{const generation=++importGeneration;importData=null;$('import-summary').textContent='';$('settings-restore').disabled=true;$('workspace-error').hidden=true;try{const file=$('settings-file').files[0];if(!file)return;if(file.size>W.MAX_BYTES)throw Error('备份文件过大，最多支持 4 MB。');const data=W.parse(await file.text());if(generation!==importGeneration)return;importData=data;$('import-summary').textContent='包含 '+data.profiles.length+' 个常用视角，选择 '+data.current.selection.length+' 个笔记本，隐藏 '+data.current.hidden.length+' 项。';$('settings-restore').disabled=false;}catch(error){if(generation===importGeneration)workspaceError(error.message);}};
-  $('settings-restore').onclick=async()=>{if(!importData)return;if(await applySnapshot(importData.current,{library:{profiles:importData.profiles,last:importData.current}})){renderProfiles();$('workspace-error').hidden=true;$('workspace-status').textContent='已恢复备份中的图谱设置。';}};
   $('nav-back').onclick=()=>moveHistory(-1);$('nav-forward').onclick=()=>moveHistory(1);
-  $('manage-hidden').onclick=()=>hiddenDialog();$('manage-hidden-header').onclick=()=>hiddenDialog();
-  for(const id of ['hidden-close','hidden-cancel'])$(id).onclick=()=>$('hidden-dialog').close();
-  $('hidden-search').oninput=()=>{state.hideLimit=200;renderHiddenList();};$('hidden-only').onchange=()=>{state.hideLimit=200;renderHiddenList();};
-  $('hidden-restore').onclick=()=>{if(!state.hideDraft)return;for(const n of state.rawMap.values())if(isDocument(n))state.hideDraft.delete(n.id);renderHiddenList();};
-  $('hidden-apply').onclick=()=>{if(!state.hideDraft||!saveHidden(state.hideDraft))return;$('hidden-dialog').close();state.hideDraft=null;applyVisibility();};
   $('refresh').onclick=()=>load();$('home').onclick=()=>state.root&&focus(state.root);
   $('search').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.query=$('search').value.trim();if(state.query)state.focus=state.root;renderTree();renderMap(true);},160);});
   $('depth').onchange=()=>renderMap(true);$('limit').onchange=()=>renderMap(true);
   $('label-mode').onchange=()=>{state.labelMode=$('label-mode').value;preferences();updateLabels();};
-  $('show-references').onchange=()=>{state.showReferences=$('show-references').checked;preferences();drawReferences();};
+  $('show-references').onchange=()=>{state.showReferences=$('show-references').checked;preferences();readReferences();};
   $('selected-references').onchange=()=>{state.selectedReferences=$('selected-references').checked;preferences();drawReferences();};
   document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{state.view=b.dataset.view;preferences();renderMap(true);});
   $('theme').onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';preferences();};
@@ -510,14 +481,14 @@
   graph.addEventListener('pointerup',e=>{state.drag=null;graph.classList.remove('dragging');if(graph.hasPointerCapture(e.pointerId))graph.releasePointerCapture(e.pointerId);setTimeout(()=>{state.moved=false;},0);});
   graph.addEventListener('pointercancel',()=>{state.drag=null;state.moved=false;graph.classList.remove('dragging');});
   window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{fitScale();transform();},100);});
-  window.addEventListener('message',event=>{if(event.source!==window.parent||event.origin!==location.origin)return;if(event.data?.type==='personal-atlas-backup-status'){$('workspace-status').textContent=event.data.ok?'设置已保存到思源工作空间，也可导出一份文件。':'工作空间备份暂不可用，可导出文件备份。';return;}if(event.data?.type!=='personal-atlas-refresh'||!$('auto').checked)return;clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>load(true),1200);});
-  window.addEventListener('storage',event=>{if(event.key===W.KEY){workspaceLibrary=W.read(localStorage);if($('workspace-dialog').open)renderProfiles();return;}if(event.key===H.KEY){state.hidden=H.read(localStorage);$('hidden-dialog').close();state.hideDraft=null;applyVisibility();return;}if(event.key!==S.KEY&&event.key!==null)return;state.hidden=H.read(localStorage);state.selection=S.read(localStorage);restorePending=null;resetScope();load();});
+  window.addEventListener('message',event=>{if(event.source!==window.parent||event.origin!==location.origin)return;if(event.data?.type==='personal-atlas-backup-status'){if(!event.data.ok)workspaceError('图谱设置暂未保存到思源工作空间，当前本机设置仍保留。');return;}if(event.data?.type!=='personal-atlas-refresh'||!$('auto').checked)return;clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>load(true,{referencesChanged:event.data.command==='transactions'}),1200);});
+  window.addEventListener('storage',event=>{if(event.key===W.KEY){workspaceLibrary=W.read(localStorage);return;}if(event.key===H.KEY){state.hidden=H.read(localStorage);scopePicker.close();applyVisibility();return;}if(event.key!==S.KEY&&event.key!==null)return;state.hidden=H.read(localStorage);state.selection=S.read(localStorage);restorePending=null;resetScope();load();});
   for(const name of ['pointerdown','keydown'])document.addEventListener(name,()=>{if(!applyingSnapshot)remember();},true);
   document.addEventListener('wheel',()=>{if(Date.now()-lastWheel>300)remember();lastWheel=Date.now();scheduleSession();},{capture:true,passive:true});
   for(const name of ['click','change','pointerup'])document.addEventListener(name,()=>scheduleSession(true));
   for(const name of ['input','keyup'])document.addEventListener(name,()=>scheduleSession());
   const interval=setInterval(()=>{if($('auto').checked&&!document.hidden)load(true);},30000);
-  window.addEventListener('beforeunload',()=>{if(sessionDirty)saveSession();state.destroyed=true;state.loadController?.abort();state.previewController?.abort();clearInterval(interval);clearTimeout(sessionTimer);clearTimeout(historyTimer);clearTimeout(refreshTimer);clearTimeout(searchTimer);clearTimeout(resizeTimer);});
+  window.addEventListener('beforeunload',()=>{if(sessionDirty)saveSession();state.destroyed=true;state.loadController?.abort();state.previewController?.abort();cancelReferences();clearInterval(interval);clearTimeout(sessionTimer);clearTimeout(historyTimer);clearTimeout(refreshTimer);clearTimeout(searchTimer);clearTimeout(resizeTimer);});
   async function start(){
     if(window.parent!==window){
       const initial=await new Promise(resolve=>{const timer=setTimeout(()=>{window.removeEventListener('message',handler);resolve(null);},1500);const handler=event=>{if(event.source!==window.parent||event.origin!==location.origin||event.data?.type!=='personal-atlas-backup-initial')return;clearTimeout(timer);window.removeEventListener('message',handler);resolve(event.data.settings);};window.addEventListener('message',handler);window.parent.postMessage({type:'personal-atlas-ready'},location.origin);});
@@ -525,5 +496,10 @@
     }
     await load();if(state.root)notifyBackup();
   }
+  const scopePicker=window.AtlasScopePicker({
+    state,readCatalog:signal=>api('/api/notebook/lsNotebooks',{},signal),
+    readChildren:(node,picker)=>api('/api/filetree/listDocsByPath',{notebook:node.notebookId,path:node.path,maxListCount:100000,ignoreMaxListHint:true},picker.controller.signal,{picker,node}),
+    apply:()=>{state.selection=S.read(localStorage);state.hidden=H.read(localStorage);resetScope();load();}
+  });
   start();
 })();

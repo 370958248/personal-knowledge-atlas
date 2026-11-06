@@ -5,21 +5,27 @@
   'use strict';
   const valid=id=>typeof id==='string'&&/^\d{14}-[a-z0-9]{7}$/.test(id);
   const PAGE_SIZE=64,MAX_PAIRS=10000;
-  function query(books,cursor){
+  function query(books,cursor,excluded=[]){
     if(!Array.isArray(books)||!books.length||books.some(id=>!valid(id)))throw new Error('双链查询需要明确的笔记本范围');
     const scope=[...new Set(books)].sort().map(id=>"'"+id+"'").join(',');
+    if(!Array.isArray(excluded)||excluded.some(n=>!books.includes(n.box)||!valid(n.box)||typeof n.path!=='string'||!/^\/(?:\d{14}-[a-z0-9]{7}\/)*\d{14}-[a-z0-9]{7}\.sy$/.test(n.path)))throw Error('双链隐藏范围无效');
+    const clauses=excluded.flatMap(n=>['s','t'].map(alias=>`NOT (${alias}.box='${n.box}' AND (${alias}.path='${n.path}' OR ${alias}.path LIKE '${n.path.slice(0,-3)}/%'))`));
+    // A balanced conjunction keeps many individual hidden rules below SQLite's
+    // expression-depth limit without fetching the excluded documents.
+    const join=(start,end)=>end-start===1?clauses[start]:`(${join(start,(start+end)>>1)} AND ${join((start+end)>>1,end)})`;
+    const exclude=clauses.length?' AND '+join(0,clauses.length):'';
     let after='';
     if(cursor){
       if(!valid(cursor.source)||!valid(cursor.target))throw new Error('双链分页位置无效');
       after=` AND (r.root_id>'${cursor.source}' OR (r.root_id='${cursor.source}' AND t.root_id>'${cursor.target}'))`;
     }
-    return `SELECT r.root_id AS source_id,t.root_id AS target_id,COUNT(*) AS count FROM refs r JOIN blocks s ON s.id=r.root_id JOIN blocks t ON t.id=r.def_block_id WHERE r.box IN (${scope}) AND s.box IN (${scope}) AND t.box IN (${scope}) AND r.root_id<>t.root_id${after} GROUP BY r.root_id,t.root_id ORDER BY source_id,target_id LIMIT ${PAGE_SIZE}`;
+    return `SELECT r.root_id AS source_id,t.root_id AS target_id,COUNT(*) AS count FROM refs r JOIN blocks s ON s.id=r.root_id JOIN blocks t ON t.id=r.def_block_id WHERE r.box IN (${scope}) AND s.box IN (${scope}) AND t.box IN (${scope}) AND r.root_id<>t.root_id${exclude}${after} GROUP BY r.root_id,t.root_id ORDER BY source_id,target_id LIMIT ${PAGE_SIZE}`;
   }
-  async function read(books,map,request){
-    if(!books.length)return {edges:[],limited:false};
+  async function read(books,map,request,{excluded=[]}={}){
+    if(!books.length||![...map.values()].some(n=>n.kind==='document'))return {edges:[],limited:false};
     const rows=[];let cursor=null,limited=false;
     while(true){
-      const page=await request(query(books,cursor),{books,cursor});
+      const page=await request(query(books,cursor,excluded),{books,cursor,excluded});
       if(!Array.isArray(page))throw new Error('双链数据格式不正确');
       if(!page.length)break;
       const last=page[page.length-1],next={source:last.source_id,target:last.target_id};

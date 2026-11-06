@@ -8,8 +8,8 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parent
 FILES = ['index.js', 'index.css', 'core.js', 'selection.js', 'references.js',
-         'visibility.js', 'workspace.js', 'atlas.js', 'atlas.html', 'atlas.css',
-         'plugin.json', 'README.md', 'LICENSE', 'icon.png', 'icon.svg', 'preview.png']
+         'visibility.js', 'workspace.js', 'loader.js', 'atlas.js', 'atlas.html', 'atlas.css',
+         'scope-picker.js', 'plugin.json', 'README.md', 'LICENSE', 'icon.png', 'icon.svg', 'preview.png']
 
 def validate():
     manifest = json.loads((ROOT / 'plugin.json').read_text(encoding='utf-8-sig'))

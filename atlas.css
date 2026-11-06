@@ -13,3 +13,21 @@
 
 @media(max-width:920px){.workspace{grid-template-rows:minmax(240px,1fr) 230px}.right-panel{display:block;grid-column:1/-1}.right-panel .stats-grid{margin:10px 0}.right-panel .detail-title{font-size:17px}.right-panel .detail-eyebrow{margin-bottom:5px}.right-panel .detail-path{margin-bottom:10px}}
 @media(max-width:600px){.workspace{grid-template-rows:minmax(220px,1fr) 200px}}
+
+/* Notebook scope and folder visibility share one collapsed tree. */
+.scope-toolbar {display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:9px 0}
+.scope-toolbar .check-row {margin:0;padding:0}
+.scope-toolbar button {font-size:11px;padding:4px}
+#notebook-dialog {width:min(640px,calc(100vw - 24px))}
+#notebook-dialog .notebook-list {max-height:48vh;padding:6px 9px}
+.scope-row {display:flex;align-items:center;gap:5px;border-bottom:1px solid var(--line);min-height:49px}
+.scope-toggle {flex:none;width:25px;height:29px;color:var(--blue);font-size:17px}
+.scope-toggle:disabled {cursor:default}
+.scope-label {display:flex;align-items:center;gap:10px;min-width:0;flex:1;padding:9px 0;cursor:pointer}
+.scope-label input {width:15px;height:15px;accent-color:var(--blue);flex:none}
+.scope-text {min-width:0;display:flex;flex-direction:column;gap:4px}
+.scope-text strong {font-size:12px;font-weight:550;overflow-wrap:anywhere}
+.scope-text small {font-size:10px;color:var(--muted);line-height:1.5}
+.scope-more,.scope-loading {display:block;margin:8px 12px;font-size:11px;color:var(--muted)}
+
+#scope-hidden-count{margin:6px 0 0;font-size:10px;line-height:1.5;white-space:normal}
